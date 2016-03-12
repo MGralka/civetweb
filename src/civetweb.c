@@ -841,7 +841,6 @@ typedef int socklen_t;
 typedef struct ssl_st SSL;
 typedef struct ssl_method_st SSL_METHOD;
 typedef struct ssl_ctx_st SSL_CTX;
-typedef struct x509_store_ctx_st X509_STORE_CTX;
 
 #define SSL_CTRL_OPTIONS (32)
 #define SSL_CTRL_CLEAR_OPTIONS (77)
@@ -2339,7 +2338,7 @@ mg_get_response_code_text(int response_code, struct mg_connection *conn)
 		return "Network Authentication Required"; /* RFC 6585, Section 6 */
 
 	/* Other status codes, not shown in the IANA HTTP status code assignment.
-	/* E.g., "de facto" standards due to common use, ... */
+	   E.g., "de facto" standards due to common use, ... */
 	case 418:
 		return "I am a teapot"; /* RFC2324 Section 2.3.2 */
 	case 419:
@@ -10634,6 +10633,8 @@ initialize_ssl(struct mg_context *ctx)
 static int
 ssl_use_pem_file(struct mg_context *ctx, const char *pem)
 {
+	int callback_ret = 0;
+
 	if (SSL_CTX_use_certificate_file(ctx->ssl_ctx, pem, 1) == 0) {
 		mg_cry(fc(ctx),
 		       "%s: cannot open certificate file %s: %s",
@@ -10643,14 +10644,29 @@ ssl_use_pem_file(struct mg_context *ctx, const char *pem)
 		return 0;
 	}
 
-	/* could use SSL_CTX_set_default_passwd_cb_userdata */
-	if (SSL_CTX_use_PrivateKey_file(ctx->ssl_ctx, pem, 1) == 0) {
+	if (ctx->callbacks.load_private_key != NULL)
+		callback_ret = ctx->callbacks.load_private_key(ctx->ssl_ctx);
+
+	if (callback_ret < 0) {
 		mg_cry(fc(ctx),
-		       "%s: cannot open private key file %s: %s",
+		       "%s: error while loading private key file %s: %s",
 		       __func__,
 		       pem,
 		       ssl_error());
 		return 0;
+	}
+
+	if (callback_ret == 0)
+	{
+		/* could use SSL_CTX_set_default_passwd_cb_userdata */
+		if (SSL_CTX_use_PrivateKey_file(ctx->ssl_ctx, pem, 1) == 0) {
+			mg_cry(fc(ctx),
+			       "%s: cannot open private key file %s: %s",
+			       __func__,
+			       pem,
+			       ssl_error());
+			return 0;
+		}
 	}
 
 	if (SSL_CTX_check_private_key(ctx->ssl_ctx) == 0) {
@@ -10810,9 +10826,11 @@ set_ssl_option(struct mg_context *ctx)
 			return 0;
 		}
 
+		/* Use verify callback set by user if pointer is not NULL. */
 		SSL_CTX_set_verify(ctx->ssl_ctx,
 		                   SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
-		                   NULL);
+						   ctx->callbacks.verify_callback ?
+						   ctx->callbacks.verify_callback : NULL);
 
 		if (use_default_verify_paths
 		    && SSL_CTX_set_default_verify_paths(ctx->ssl_ctx) != 1) {

@@ -44,6 +44,8 @@
 #include <stdio.h>
 #include <stddef.h>
 
+typedef struct x509_store_ctx_st X509_STORE_CTX;
+
 #ifdef __cplusplus
 extern "C" {
 #endif /* __cplusplus */
@@ -141,7 +143,7 @@ struct mg_callbacks {
 		0: verification failed and handshake should be terminated.
 		1: verification succesfull - continue with handshake.
 		 */
-	int (*verify_callback)(int preverify_ok, void *x509_store_ctx);
+	int (*verify_callback)(int preverify_ok, X509_STORE_CTX *store);
 #if defined(MG_LEGACY_INTERFACE)
 	/* Called when websocket request is received, before websocket handshake.
 	   Return value:
