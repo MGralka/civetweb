@@ -129,6 +129,19 @@ struct mg_callbacks {
 	    -1: initializing ssl fails. */
 	int (*init_ssl)(void *ssl_context, void *user_data);
 
+	/* Called when civetweb is about to load server's private key.
+		 0: civetweb will load the private key passed in ssl_certificate
+			option.
+		 1: civetweb assumes the callback set up the private key and will not
+			load the private key itself.
+		-1: an error occured. */
+	int (*load_private_key)(void *ssl_context);
+
+	/* Called when SSL verifies certificates received from the peer.
+		0: verification failed and handshake should be terminated.
+		1: verification succesfull - continue with handshake.
+		 */
+	int (*verify_callback)(int preverify_ok, void *x509_store_ctx);
 #if defined(MG_LEGACY_INTERFACE)
 	/* Called when websocket request is received, before websocket handshake.
 	   Return value:
