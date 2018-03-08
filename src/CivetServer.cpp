@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2014 the Civetweb developers
+/* Copyright (c) 2013-2017 the Civetweb developers
  * Copyright (c) 2013 No Face Press, LLC
  *
  * License http://opensource.org/licenses/mit-license.php MIT License
@@ -263,12 +263,19 @@ CivetServer::webSocketCloseHandler(const struct mg_connection *conn,
 	}
 }
 
+CivetCallbacks::CivetCallbacks()
+{
+	memset(this, 0, sizeof(*this));
+}
+
 CivetServer::CivetServer(const char **options,
-                         const struct mg_callbacks *_callbacks)
+                         const struct CivetCallbacks *_callbacks,
+                         const void *UserContextIn)
     : context(0)
 {
-	struct mg_callbacks callbacks;
-	memset(&callbacks, 0, sizeof(callbacks));
+	struct CivetCallbacks callbacks;
+
+	UserContext = UserContextIn;
 
 	if (_callbacks) {
 		callbacks = *_callbacks;
@@ -284,11 +291,13 @@ CivetServer::CivetServer(const char **options,
 }
 
 CivetServer::CivetServer(std::vector<std::string> options,
-                         const struct mg_callbacks *_callbacks)
+                         const struct CivetCallbacks *_callbacks,
+                         const void *UserContextIn)
     : context(0)
 {
-	struct mg_callbacks callbacks;
-	memset(&callbacks, 0, sizeof(callbacks));
+	struct CivetCallbacks callbacks;
+
+	UserContext = UserContextIn;
 
 	if (_callbacks) {
 		callbacks = *_callbacks;
@@ -318,17 +327,16 @@ CivetServer::~CivetServer()
 void
 CivetServer::closeHandler(const struct mg_connection *conn)
 {
-	const struct mg_request_info *request_info = mg_get_request_info(conn);
-	assert(request_info != NULL);
-	CivetServer *me = (CivetServer *)(request_info->user_data);
+	CivetServer *me = (CivetServer *)mg_get_user_data(mg_get_context(conn));
 	assert(me != NULL);
 
 	// Happens when a request hits the server before the context is saved
 	if (me->context == NULL)
 		return;
 
-	if (me->userCloseHandler)
+	if (me->userCloseHandler) {
 		me->userCloseHandler(conn);
+	}
 	mg_lock_context(me->context);
 	me->connections.erase(const_cast<struct mg_connection *>(conn));
 	mg_unlock_context(me->context);
@@ -538,6 +546,23 @@ CivetServer::getParam(const char *data,
 	return false;
 }
 
+std::string
+CivetServer::getPostData(struct mg_connection *conn)
+{
+	mg_lock_connection(conn);
+	std::string postdata;
+	char buf[2048];
+	int r = mg_read(conn, buf, sizeof(buf));
+	while (r > 0) {
+		std::string p = std::string(buf);
+		p.resize(r);
+		postdata += p;
+		r = mg_read(conn, buf, sizeof(buf));
+	}
+	mg_unlock_connection(conn);
+	return postdata;
+}
+
 void
 CivetServer::urlEncode(const char *src, std::string &dst, bool append)
 {
@@ -571,11 +596,21 @@ CivetServer::urlEncode(const char *src,
 std::vector<int>
 CivetServer::getListeningPorts()
 {
-	std::vector<int> ports(10);
-	std::vector<int> ssl(10);
-	size_t size = mg_get_ports(context, ports.size(), &ports[0], &ssl[0]);
+	std::vector<int> ports(50);
+	std::vector<struct mg_server_ports> server_ports(50);
+	int size = mg_get_server_ports(context,
+	                               (int)server_ports.size(),
+	                               &server_ports[0]);
+	if (size <= 0) {
+		ports.resize(0);
+		return ports;
+	}
 	ports.resize(size);
-	ssl.resize(size);
+	server_ports.resize(size);
+	for (int i = 0; i < size; i++) {
+		ports[i] = server_ports[i].port;
+	}
+
 	return ports;
 }
 
